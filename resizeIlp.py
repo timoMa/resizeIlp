@@ -6,12 +6,22 @@ import os
 
 from IlastikLabelManager import labelManager
 
-def downsampleProject(ilpPath):
+def downsampleProject(ilpPath, adjustScales=False):
     assert ilpPath.endswith('.ilp'), 'ilp file is required for downsampling. did you mean to upsample?'
     name = ilpPath + 'small.ilp'
     copyfile(ilpPath, name)
 
     f = File(name)
+    # move feature matrix to smaller sigmas (first row should stay the same, second should not be overwritten, but 'or'ed, the rest is just moved to the next smaller sigma.
+    if adjustScales:
+        matrix = f['FeatureSelections/SelectionMatrix/'].value
+        matrix[:,1] = np.logical_or(matrix[:,2], matrix[:,1])
+        matrix[:,2:-1] = matrix[:,3:]
+        matrix[:,-1] = False
+        del f['FeatureSelections/SelectionMatrix/']
+        f['FeatureSelections/SelectionMatrix/'] = matrix
+
+
     for key in f['Input Data/infos'].keys():
         path = f['Input Data/infos/' + key + '/Raw Data/filePath'].value
         rawPath = os.path.split(path)
@@ -58,6 +68,7 @@ def downsampleProject(ilpPath):
                     # if exportBlock.max() != 0
                     offset = [x,y,z]
                     labels.addBlockLabel(exportBlock, offset)
+        labels.flush()
 
         print 'resize raw data'
         rawData = vigra.readHDF5(*rawPath)
@@ -75,32 +86,48 @@ def downsampleProject(ilpPath):
 
         f['Input Data/infos/' + key + '/Raw Data/filePath'] = exportRawPath[0] + '/' + exportRawPath[1]
 
-def upsample(path):
-    """ upsampling of multichannel data (ignoring the last dimension which should be used for channels)"""
-    splitPath = path.split('.h5')
-    assert len(splitPath) != 1, "file seems to not have the .h5 extension"
+def upsample(probPath, rawPath):
+    """ upsampling of multichannel data of an ilp (ignoring the last dimension which should be used for channels) and concatanating int with the raw image """
 
-    data = vigra.readHDF5(splitPath[0] + '.h5', splitPath[1]).squeeze()
-    assert len(data.shape) == 3, "only 3d data supported"
+    splitProbPath = probPath.split('.h5')
+    assert len(splitProbPath) !=1, "file " + splitProbPath[0] + "seems to not have the .h5 extension"
+
+    data = vigra.readHDF5(splitProbPath[0] + '.h5', splitProbPath[1]).squeeze()
+
+    if len(data.shape) != 4:
+        print "WARNING: untested for data other than 3d + channel."
 
     if isinstance(data,vigra.VigraArray):
         data = data.view(np.ndarray)
 
+    # normalize probabilities and save them as hdf5
     data = np.require(data, dtype=np.float32)
-    data = vigra.sampling.resize(data, shape=[size*2 for size in data.shape[:3]], order=2)
-    vigra.writeHDF5(data, splitPath[0] + '_upsampled.h5', splitPath[1])
+    data = vigra.sampling.resize(data, shape=[size*2 for size in data.shape[:-1]], order=2)
+    data -= data.min()
+    data *= 255 / data.max()
+    data = data.astype(np.uint8)
+
+    if rawPath != None:
+        splitRawPath = rawPath.split('.h5')
+        raw = vigra.readHDF5(splitRawPath[0] + '.h5', splitRawPath[1]).squeeze()
+        assert len(splitRawPath) !=1, "file " + splitRawPath[0] + "seems to not have the .h5 extension"
+        data = np.concatenate((raw[:,:,:,None], data), axis=3)
+
+    vigra.writeHDF5(data.astype(np.uint8), splitProbPath[0] + '_upsampled.h5', splitProbPath[1])
 
 
 if __name__ == '__main__':
     import argparse
-    paraser = argparse.ArgumentParser()
-    paraser.add_argument("input_path")
-    paraser.add_argument("--upsample", action="store_true")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_path")
+    parser.add_argument("--stackWithRaw", default=None)
+    parser.add_argument("--upsample", action="store_true")
+    parser.add_argument("--adjustScales", action="store_true")
 
-    args = paraser.parse_args()
+    args = parser.parse_args()
     path = args.input_path
     if args.upsample:
-        upsample(path)
+        upsample(path, args.stackWithRaw)
     else:
-        downsampleProject(path)
+        downsampleProject(path, args.adjustScales)
     # upsampleMultiChannelData('/home/timo/multiscaletest/results/actualHoles_resized_probs.h5', 'exported_data')

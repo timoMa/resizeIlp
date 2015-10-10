@@ -1,8 +1,12 @@
 ## Usage
 downsampling:
 
-    python resizeIlp.py myIlp.ilp
+python resizeIlp.py <pathToILP>.ilp
 
 upsampling:
 
-    python resizeILP.py myH5.h5/intermalPath --upsample
+    python resizeILP.py <pathToProbaabilityHdf5>.h5/intermalPath --upsample
+
+upsampling and stacking with raw data:
+
+    python resizeIlp.py <pathToProbabilityHdf5>.h5/<internalPath> --upsample --stackWithRaw <pathToRawHdf5>.h5/<internalPath>
