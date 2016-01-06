@@ -4,6 +4,8 @@ from shutil import copyfile
 from h5py import File
 import os
 
+from libs.essentials import splitPath
+
 from IlastikLabelManager import labelManager
 
 def downsampleProject(ilpPath, adjustScales=False):
@@ -55,7 +57,6 @@ def downsampleProject(ilpPath, adjustScales=False):
         labels.flush()
 
         step = 90
-        exportBlocks = []
         offsets = []
 
         resizedShape = resized.shape
@@ -116,6 +117,35 @@ def upsample(probPath, rawPath):
     vigra.writeHDF5(data.astype(np.uint8), splitProbPath[0] + '_upsampled.h5', splitProbPath[1])
 
 
+def pureConcaternation(probPath, rawPath):
+    """concatanating int with the raw image """
+
+    assert len(splitPath(probPath)) == 2, "file " + probPath + "seems to not have the .h5 extension"
+
+    data = vigra.readHDF5(*splitPath(probPath)).squeeze()
+
+    if len(data.shape) != 4:
+        print "WARNING: untested for data other than 3d + channel."
+
+    if isinstance(data,vigra.VigraArray):
+        data = data.view(np.ndarray)
+
+    # normalize probabilities and save them as hdf5
+    data = np.require(data, dtype=np.float32)
+    data = vigra.sampling.resize(data, shape=[size*2 for size in data.shape[:-1]], order=2)
+    data -= data.min()
+    data *= 255 / data.max()
+    data = data.astype(np.uint8)
+
+    if rawPath != None:
+        assert len(splitPath(rawPath)) == 2, "file " + rawPath + "seems to not have the .h5 extension"
+        raw = vigra.readHDF5(*splitPath(rawPath)).squeeze()
+        data = np.concatenate((raw[:,:,:,None], data), axis=3)
+
+    vigra.writeHDF5(data.astype(np.uint8), splitProbPath[0] + '_upsampled.h5', splitProbPath[1])
+
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
@@ -128,6 +158,8 @@ if __name__ == '__main__':
     path = args.input_path
     if args.upsample:
         upsample(path, args.stackWithRaw)
+    elif args.stackWithRaw is not None:
+        pureConcaternation(probPath, rawPath)
     else:
         downsampleProject(path, args.adjustScales)
     # upsampleMultiChannelData('/home/timo/multiscaletest/results/actualHoles_resized_probs.h5', 'exported_data')
