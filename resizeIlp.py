@@ -8,7 +8,7 @@ from libs.essentials import splitPath
 
 from IlastikLabelManager import labelManager
 
-def downsampleProject(ilpPath, adjustScales=False):
+def downsampleProject(ilpPath, adjustScales=False, resizeRaw=True):
     assert ilpPath.endswith('.ilp'), 'ilp file is required for downsampling. did you mean to upsample?'
     name = ilpPath + 'small.ilp'
     copyfile(ilpPath, name)
@@ -26,66 +26,43 @@ def downsampleProject(ilpPath, adjustScales=False):
 
     for key in f['Input Data/infos'].keys():
         path = f['Input Data/infos/' + key + '/Raw Data/filePath'].value
-        rawPath = os.path.split(path)
-        rawData = File(rawPath[0], 'r')
-        rawShape = rawData['im'].shape
-        targetShape = tuple([int(ordinate / 2) for ordinate in rawShape])
 
+        # resize the labels
         labels = labelManager(name)
         labeledBlocks = labels.getSubBlocks()
+        labeledBlocksResized = list()
+        for labeledBlock in labeledBlocks:
+            targetShape = tuple([int(ordinate / 2) for ordinate in labeledBlock[1].shape[:3]])
+            resized = np.zeros(targetShape, dtype=np.uint8)
+            vigra.graphs.downsampleLabels(labeledBlock[1], int(labelBlockTotal.max()), 0.1, resized)
+            offsetResized = tuple([int(ordinate/2) for ordinate in labeledBlock[0])
+            labeledBlocksResized.append((offsetResized, resized)
 
-        # find out the dimension of the block, there should be a better way of doing that.
-        offsets = np.array([labeledBlock[0] for labeledBlock in labeledBlocks])
-        shapes = np.array([labeledBlock[1].shape[:3] for labeledBlock in labeledBlocks])
-        data = [labelsBlock[1][:,:,:,0] for labelsBlock in labeledBlocks]
-
-        # write all labeles into one big array
-        labelBlockTotal = np.zeros(rawShape, dtype=np.uint8)
-        for offset, shape, dataBlock in zip(offsets, shapes, data):
-            index = [slice(offset[0], offset[0] + shape[0]),
-                    slice(offset[1], offset[1] + shape[1]),
-                    slice(offset[2], offset[2] + shape[2])]
-            labelBlockTotal[index] += dataBlock
-
-        resized = np.zeros(targetShape)
-
-
-        resized = np.zeros(targetShape, dtype=np.uint8)
-        vigra.graphs.downsampleLabels(labelBlockTotal, int(labelBlockTotal.max()), 0.1, resized)
-
+        # clear the old labelds
         labels.clear()
         labels.flush()
 
-        step = 90
-        offsets = []
+        for labeledBlock in labeledBlocksResized:
+            labels.addBlockLabel(labeledBlock[1][:,:,:,None], labeledBlock[0])
 
-        resizedShape = resized.shape
-        for x in np.arange(0, resizedShape[0], step):
-            for y in np.arange(0, resizedShape[1], step):
-                for z in np.arange(0, resizedShape[2], step):
-                    exportBlock = resized[x:x+step, y:y+step, z:z+step]
-                    exportBlock = exportBlock[:,:,:,None]
-                    # only write labels, if there are some
-                    # if exportBlock.max() != 0
-                    offset = [x,y,z]
-                    labels.addBlockLabel(exportBlock, offset)
         labels.flush()
 
-        print 'resize raw data'
-        rawData = vigra.readHDF5(*rawPath)
+        if resizeRaw:
+            print 'resize raw data'
+            rawData = vigra.readHDF5(*rawPath)
 
-        exportRawPath = [rawPath[0].split('.')[0] + '_resized.h5', rawPath[1]]
+            exportRawPath = [rawPath[0].split('.')[0] + '_resized.h5', rawPath[1]]
 
-        rawSmall = vigra.sampling.resize(rawData.astype(np.float32), resizedShape, 0)
-        vigra.writeHDF5(rawSmall, *exportRawPath)
+            rawSmall = vigra.sampling.resize(rawData.astype(np.float32), resizedShape, 0)
+            vigra.writeHDF5(rawSmall, *exportRawPath)
 
 
-        try:
-            del f['Input Data/infos/' + key + '/Raw Data/filePath']
-        except KeyError:
-            pass
+            try:
+                del f['Input Data/infos/' + key + '/Raw Data/filePath']
+            except KeyError:
+                pass
 
-        f['Input Data/infos/' + key + '/Raw Data/filePath'] = exportRawPath[0] + '/' + exportRawPath[1]
+            f['Input Data/infos/' + key + '/Raw Data/filePath'] = exportRawPath[0] + '/' + exportRawPath[1]
 
 def upsample(probPath, rawPath):
     """ upsampling of multichannel data of an ilp (ignoring the last dimension which should be used for channels) and concatanating int with the raw image """
