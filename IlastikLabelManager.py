@@ -53,7 +53,7 @@ class labelManager(object):
     def clear(self):
         dataset = self._f['PixelClassification/LabelSets/labels000']
         for key in dataset.keys():
-            dataset.pop(key)
+            del dataset[key]
         self._blockNumber = 0
 
     def getSubBlocks(self):
