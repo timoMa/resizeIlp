@@ -4,6 +4,7 @@ from shutil import copyfile
 from h5py import File
 import os
 from IPython import embed
+from libs.viewerModule import view3d
 
 from libs.essentials import splitPath
 
@@ -33,18 +34,34 @@ def downsampleProject(ilpPath, adjustScales=False, resizeRaw=True):
         labels = labelManager(name)
         labeledBlocks = labels.getSubBlocks()
         labeledBlocksResized = list()
-        for labeledBlock in labeledBlocks:
-            labeledBlock[1] = labeledBlock[1][...,0]
-            # size must be at least 4x4x4 to work without an error.
-            shapeOrig = labeledBlock[1].shape[:3]
-            shapeTarget = [max(int(ordinate/2), 1) for ordinate in shapeOrig]
-            labeledBlock[1] = np.resize(labeledBlock[1], [max(ordinate,4) for ordinate in labeledBlock[1].shape])
-            targetShape = tuple([int(ordinate / 2) for ordinate in labeledBlock[1].shape[:3]])
-            resized = np.zeros(targetShape, dtype=np.uint8)
-            vigra.graphs.downsampleLabels(labeledBlock[1].astype(np.uint8), int(labeledBlock[1].max()), 0.05, resized) # get back the original shape
+        for labelsOffset, labelsData in labeledBlocks:
 
-            resized = resized[:shapeTarget[0], :shapeTarget[1], :shapeTarget[2]]
-            offsetResized = tuple([int(ordinate/2) for ordinate in labeledBlock[0]])
+            # last dimension is singelton.
+            labelsData = labelsData[...,0]
+
+            originalShape = labelsData.shape
+
+            # memorize the final target shape.
+            targetShape = [max(int(ordinate/2), 1) for ordinate in originalShape]
+
+            # size must be at least 4x4x4 to work without an error.
+            if np.any(np.array(originalShape) < np.array([4,4,4])):
+                shapeBeforeScaling = [max(4, ordinate) for ordinate in originalShape]
+                dataBeforeScaling = np.zeros(shapeBeforeScaling, dtype=np.uint8)
+                slicing = [slice(0, size) for size in originalShape]
+                dataBeforeScaling[slicing] = labelsData
+
+                labelsData = dataBeforeScaling
+                originalShape = shapeBeforeScaling
+
+            shapeAfterResize = [max(int(ordinate/2), 1) for ordinate in originalShape]
+
+            # resize the labels
+            resized = np.zeros(shapeAfterResize, dtype=np.uint8)
+            vigra.graphs.downsampleLabels(labelsData, int(labelsData.max()), 0.05, resized) # get back the original shape
+
+            resized = resized[[slice(0,size) for size in targetShape]]
+            offsetResized = tuple([int(ordinate/2) for ordinate in labelsOffset])
             labeledBlocksResized.append((offsetResized, resized))
 
         # clear the old labelds
