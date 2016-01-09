@@ -91,31 +91,48 @@ def downsampleProject(ilpPath, adjustScales=False, resizeRaw=True):
 
             f['Input Data/infos/' + key + '/Raw Data/filePath'] = exportRawPath[0] + '/' + exportRawPath[1]
 
-def upsample(probPath, rawPath):
+def upsample(probPath, rawPath, transpose, channel):
     """ upsampling of multichannel data of an ilp (ignoring the last dimension which should be used for channels) and concatanating int with the raw image """
 
     splitProbPath = probPath.split('.h5')
     assert len(splitProbPath) !=1, "file " + splitProbPath[0] + "seems to not have the .h5 extension"
 
     data = vigra.readHDF5(splitProbPath[0] + '.h5', splitProbPath[1]).squeeze()
+    if transpose['prob']:
+        data = np.transpose(data, [2,1,0,3])
+
+    if channel is not None:
+        data = data[:,:,:,channel]
+        if len(data.shape) == 3:
+            data = data[:,:,:,None]
 
     if len(data.shape) != 4:
         print "WARNING: untested for data other than 3d + channel."
 
-    if isinstance(data,vigra.VigraArray):
-        data = data.view(np.ndarray)
+    # if isinstance(data,vigra.VigraArray):
+        # data = data.view(np.ndarray)
+
+    if rawPath != None:
+        splitRawPath = rawPath.split('.h5')
+        assert len(splitRawPath) !=1, "file " + splitRawPath[0] + "seems to not have the .h5 extension"
+        raw = vigra.readHDF5(splitRawPath[0] + '.h5', splitRawPath[1]).squeeze()
+        if transpose['raw']:
+            raw = raw.T
+        targetShape = raw.shape
+        print 'check please: theoretical', [size*2 for size in data.shape[:-1]], 'actual shape', targetShape
+    else:
+        targetShape = [size*2 for size in data.shape[:-1]]
+
+    embed()
 
     # normalize probabilities and save them as hdf5
     data = np.require(data, dtype=np.float32)
-    data = vigra.sampling.resize(data, shape=[size*2 for size in data.shape[:-1]], order=2)
+    data = vigra.sampling.resize(data, shape=targetShape, order=2)
     data -= data.min()
     data *= 255 / data.max()
     data = data.astype(np.uint8)
 
     if rawPath != None:
-        splitRawPath = rawPath.split('.h5')
-        raw = vigra.readHDF5(splitRawPath[0] + '.h5', splitRawPath[1]).squeeze()
-        assert len(splitRawPath) !=1, "file " + splitRawPath[0] + "seems to not have the .h5 extension"
         data = np.concatenate((raw[:,:,:,None], data), axis=3)
 
     vigra.writeHDF5(data.astype(np.uint8), splitProbPath[0] + '_upsampled.h5', splitProbPath[1])
@@ -151,7 +168,7 @@ def pureConcaternation(probPath, rawPath):
         embed()
         data = np.concatenate((raw[:,:,:,None], data), axis=3)
 
-    vigra.writeHDF5(data.astype(np.uint8), splitPath(probPath)[0] + '_stacked.h5', splitPath(probPath)[1])
+    vigra.writeHDF5(data.astype(np.uint8), probPath.split('.h5')[0] + '_stacked.h5', splitPath(probPath)[1])
 
 
 
@@ -163,11 +180,19 @@ if __name__ == '__main__':
     parser.add_argument("--upsample", action="store_true")
     parser.add_argument("--adjustScales", action="store_true")
     parser.add_argument("--ignoreRaw", default=False, action="store_true")
+    parser.add_argument("--rawT", default=False, action="store_true")
+    parser.add_argument("--probT", default=False, action="store_true")
+    parser.add_argument("--channel", default=None, type=int)
 
     args = parser.parse_args()
     path = args.input_path
+
+    transpose = dict()
+    transpose['raw'] = args.rawT
+    transpose['prob'] = args.probT
+
     if args.upsample:
-        upsample(path, args.stackWithRaw)
+        upsample(path, args.stackWithRaw, transpose, args.channel)
     elif args.stackWithRaw is not None:
         pureConcaternation(args.input_path, args.stackWithRaw)
     else:
