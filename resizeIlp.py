@@ -91,7 +91,7 @@ def downsampleProject(ilpPath, adjustScales=False, resizeRaw=True):
 
             f['Input Data/infos/' + key + '/Raw Data/filePath'] = exportRawPath[0] + '/' + exportRawPath[1]
 
-def upsample(probPath, rawPath, transpose, channel):
+def upsample(probPath, rawPath, transpose, channel, targetShape=None, exportPath=None):
     """ upsampling of multichannel data of an ilp (ignoring the last dimension which should be used for channels) and concatanating int with the raw image """
 
     splitProbPath = probPath.split('.h5')
@@ -102,9 +102,9 @@ def upsample(probPath, rawPath, transpose, channel):
         data = np.transpose(data, [2,1,0,3])
 
     if channel is not None:
-        data = data[:,:,:,channel]
-        if len(data.shape) == 3:
-            data = data[:,:,:,None]
+        axisTags = data.axistags
+        data = data[:,:,:,[channel]]
+        data.axistags = axisTags
 
     if len(data.shape) != 4:
         print "WARNING: untested for data other than 3d + channel."
@@ -119,6 +119,8 @@ def upsample(probPath, rawPath, transpose, channel):
         if transpose['raw']:
             raw = raw.T
         targetShape = raw.shape
+        print 'check please: theoretical', [size*2 for size in data.shape[:-1]], 'actual shape', targetShape
+    elif targetShape is not None:
         print 'check please: theoretical', [size*2 for size in data.shape[:-1]], 'actual shape', targetShape
     else:
         targetShape = [size*2 for size in data.shape[:-1]]
@@ -135,8 +137,12 @@ def upsample(probPath, rawPath, transpose, channel):
     if rawPath != None:
         data = np.concatenate((raw[:,:,:,None], data), axis=3)
 
-    vigra.writeHDF5(data.astype(np.uint8), splitProbPath[0] + '_upsampled.h5', splitProbPath[1])
+    if exportPath is None:
+        exportPath = splitProbPath[0] + '_upsampled.h5/' + splitProbPath[1]
 
+    print 'exporting to ', exportPath
+    embed()
+    vigra.writeHDF5(data.astype(np.uint8), *splitPath(exportPath))
 
 def pureConcaternation(probPath, rawPath):
     """concatanating int with the raw image """
@@ -170,8 +176,6 @@ def pureConcaternation(probPath, rawPath):
 
     vigra.writeHDF5(data.astype(np.uint8), probPath.split('.h5')[0] + '_stacked.h5', splitPath(probPath)[1])
 
-
-
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
@@ -183,6 +187,9 @@ if __name__ == '__main__':
     parser.add_argument("--rawT", default=False, action="store_true")
     parser.add_argument("--probT", default=False, action="store_true")
     parser.add_argument("--channel", default=None, type=int)
+    parser.add_argument("--shapeFromRaw", default=None, type=str)
+    parser.add_argument("--exportPath", default=None, type=str)
+
 
     args = parser.parse_args()
     path = args.input_path
@@ -191,8 +198,16 @@ if __name__ == '__main__':
     transpose['raw'] = args.rawT
     transpose['prob'] = args.probT
 
+    if args.shapeFromRaw is not None:
+        targetShape = vigra.readHDF5(*splitPath(args.shapeFromRaw)).shape
+        if transpose['raw']:
+            targetShape = targetShape[::-1]
+        print 'targetShape set to', targetShape
+    else:
+        targetShape = None
+
     if args.upsample:
-        upsample(path, args.stackWithRaw, transpose, args.channel)
+        upsample(path, args.stackWithRaw, transpose, args.channel, targetShape, args.exportPath)
     elif args.stackWithRaw is not None:
         pureConcaternation(args.input_path, args.stackWithRaw)
     else:
